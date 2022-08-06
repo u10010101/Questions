@@ -1,0 +1,215 @@
+require(shiny)
+require(mongolite)
+require(shinydashboard)
+require(shinyjs)
+
+#---函数---
+#数据库信息
+options(mongodb = list(
+    "host" = "这里填连接信息，例如cluster0-jtpxd.mongodb.net",
+    "username" = "例如admin",
+    "password" = "一串密码"
+))
+databaseName <- "数据库名字，例如myFirstDatabase"
+collectionName <- "数据库下的collection的名字"
+
+#
+saveData <- function(data) {
+    db <- mongo(collection = collectionName,
+                url = sprintf(
+                    "mongodb+srv://%s:%s@%s/%s",
+                    options()$mongodb$username,
+                    options()$mongodb$password,
+                    options()$mongodb$host,
+                    databaseName
+                ),
+                options = ssl_options(weak_cert_validation = TRUE))
+    db$insert(data)
+}
+LoadData <- function(){
+    db <- mongo(collection = collectionName,
+                url = sprintf(
+                    "mongodb+srv://%s:%s@%s/%s",
+                    options()$mongodb$username,
+                    options()$mongodb$password,
+                    options()$mongodb$host,
+                    databaseName
+                ),
+                options = ssl_options(weak_cert_validation = TRUE))
+    db$find('{"status":1}')
+}
+CheckData <- function(){
+    db <- mongo(collection = collectionName,
+                url = sprintf(
+                    "mongodb+srv://%s:%s@%s/%s",
+                    options()$mongodb$username,
+                    options()$mongodb$password,
+                    options()$mongodb$host,
+                    databaseName
+                ),
+                options = ssl_options(weak_cert_validation = TRUE))
+    db$find('{"status":2}')
+}
+bechecked <- CheckData()[,-3]
+DeleteData <- function(query) {
+  db <- mongo(collection = collectionName,
+              url = sprintf(
+                "mongodb+srv://%s:%s@%s/%s",
+                options()$mongodb$username,
+                options()$mongodb$password,
+                options()$mongodb$host,
+                databaseName
+              ),
+              options = ssl_options(weak_cert_validation = TRUE))
+  db$remove(query)
+}
+FindData <- function(query) {
+  db <- mongo(collection = collectionName,
+              url = sprintf(
+                "mongodb+srv://%s:%s@%s/%s",
+                options()$mongodb$username,
+                options()$mongodb$password,
+                options()$mongodb$host,
+                databaseName
+              ),
+              options = ssl_options(weak_cert_validation = TRUE))
+  db$find(query)
+}
+
+#---
+
+ui <- dashboardPage(
+    dashboardHeader(title = "统计学复习助手"),
+    dashboardSidebar(sidebarMenu(
+      menuItem("Welcome!", tabName = "Welcome", icon = icon("book-open")),
+        menuItem("抽题页面", tabName = "dashboard", icon = icon("dashboard")),
+        menuItem("加入新题", tabName = "widgets", icon = icon("th")),
+        menuItem("下载问题", tabName = "down", icon = icon("compass")),
+        menuItem("审核新题", tabName = "check", icon = icon("info"))
+    )),
+    dashboardBody(
+        tabItems(
+          tabItem(tabName = "Welcome",
+                  h3("在“抽题页面”中有一些数学/统计相关的问题！在“加入新题”中可以提交新的问题！在“下载问题”中可以下载数据库中的所有问题！"),
+                  hr(),
+                  h3("由于本页面每月只能被访问25h，因此请使用完后积极关闭！"),hr(),
+                  h3("不要联系作者")
+          ),
+          
+            tabItem(tabName = "dashboard",
+                    h2("抽题页面"),
+                    column(3,actionButton("select", "Select")),
+                    hr(),
+                    mainPanel(verbatimTextOutput("ques"))
+            ),
+            
+            # Second tab content
+            tabItem(tabName = "widgets",
+                    h2("加入新题"),
+                    textInput("text1","问题"),
+                    textInput("text2","答案（可选）"),
+                    column(3,actionButton("submit", "提交")),
+                    mainPanel(verbatimTextOutput("index1"))
+            ),
+            tabItem(tabName = "down",
+                    mainPanel(verbatimTextOutput("count")),
+                    mainPanel(verbatimTextOutput("index2")),
+                    textInput("downpass","密码"),
+                    actionButton("downconfirm", "确认"),
+                    hidden(div(id='hid2',
+                          column(3,downloadButton("load",label="下载所有问题"))))
+            ),
+            tabItem(tabName = "check",
+                    useShinyjs(),
+                    textInput("pass","请输入管理员密码（请向管理员索要）"),
+                    actionButton("confirm", "确认"),
+                    hidden(
+                        div(id='hid',
+                            selectInput('in1', '问题', bechecked$question, selectize=F,multiple = T),
+                            verbatimTextOutput('in2'),
+                            column(3,actionButton("accept",label="接受")),
+                            column(3,actionButton("reject",label="拒绝"))
+                            
+                    )
+                )
+            )
+        )
+    )
+)
+
+
+server <- function(input, output,session) { 
+    
+    p <- LoadData()$question
+    output$count <- renderText({paste0("问题总数：",nrow(LoadData()))})
+    
+    #抽题页面按钮：
+    output$ques <-renderText({
+        input$select
+        #从数据库中随机抽取一条
+        p[sample(length(p),1)]
+    })
+    #点submit以后：
+    observeEvent(input$submit, {
+        data <- data.frame(
+            question=input$text1,
+            answer=input$text2,
+            status=2
+        )
+           saveData(data)
+           output$index1 <- renderText({input$submit
+               "succeeded! Thank you for your question!"})
+      })
+    #修改时将状态栏清空
+    observeEvent(input$text1, {
+        output$index1 <- renderText({" "})
+    })
+    observeEvent(input$text2, {
+        output$index1 <- renderText({" "})
+    })
+    
+    
+    #下载问题：
+    observeEvent(input$downconfirm, {
+      if(input$downpass=="zzz"){
+        show('hid2')
+      }
+    })
+    output$load <- downloadHandler(
+        filename = function() {
+            paste0("复习助手.txt")
+        },
+        content = function(file) {
+            write.csv2(p, file,fileEncoding = "UTF-8",row.names = F)
+        }
+    )
+    output$index2 <- renderText({"注：1.输入密码后方可下载（请向管理员索要）；2.下载后特殊字符或无法显示"})
+
+    #审核问题：显示
+    observeEvent(input$confirm, {
+        if(input$pass=="aaa"){
+            show('hid')
+        }
+    })
+   output$in2 <- renderPrint({bechecked$answer[bechecked$question==input$in1]})
+   #接受
+   observeEvent(input$accept, {
+     query <- paste0("{\"question\":\"",input$in1,"\",\"status\":1}")
+     if(nrow(FindData(query))==0){#问题呢重复再插入
+       DeleteData(paste0("{\"question\":\"",input$in1,"\",\"status\":2}"))
+       saveData(data.frame(
+         question=input$in1,answer=bechecked$answer[bechecked$question==input$in1][1],
+         status=1))
+     }
+     })
+   #拒绝
+   observeEvent(input$reject, {
+      query <- paste0("{\"question\":\"",input$in1,"\"}")
+      DeleteData(query)
+    })
+    
+    
+}
+
+shinyApp(ui, server)
+
